@@ -1,3 +1,5 @@
+function prob_deterministic_tracking(denoised_dwi_folder,noise_folder,out_dir)
+
 %% the setup
 
 paren=@(x,varargin) x(varargin{:});
@@ -30,9 +32,11 @@ curly=@(x,varargin) x{varargin{:}};
 
 %read
 ff.b0=0;
-dwi_folder='/Users/andrew/re/test/probabilistic_test/denoised'; %CHANGE
+% dwi_folder='/Users/andrew/re/test/probabilistic_test/denoised'; NOW AN
+% INPUT
 dwi_dn=d2n2s(dwi_folder,ff);
-noise_folder='/Users/andrew/re/test/probabilistic_test/noise'; %CHANGE
+% noise_folder='/Users/andrew/re/test/probabilistic_test/noise'; NOW AN
+% INPUT
 noise=d2n2s(noise_folder,ff);
 
 %sizes
@@ -60,61 +64,7 @@ randomm=rand(387200,138,10,2);
 %give a working dwi name just to make things a little more programmatic
 working_dwi_name='dwi';
 
-tic
-for u = 1:nsim
-
-    fprintf('\n simulation #%03d \n',u)
-
-    signal = zeros(size(dwi_dn_img));  
-    noise_gen = zeros(size(dwi_dn_img)); 
-    
-    
-    for v = 1:size(dwi_dn_img,2) %for all volumes
-        
-        for p = 1:size(dwi_dn_img,1) %for each voxel of a volume %vectorize this later
-
-            pix = p;
-            noise_gen(pix,v) = sqrt(2*noise_img(pix)^2)*(erfinv(2*randomm(p,v,u,1) - 1) + 1i*erfinv(2*randomm(p,v,u,2) - 1));
-
-        end
-        
-        signal(:,v) = abs(dwi_dn_img(:,v) + noise_gen(:,v));
-
-    end
-
-    signal_img = reshape(signal,[dwi_size,nvol]);
-    times{u}=toc
-    
-    signal_imgc=num2cell(signal_img,[1 2 3]); %wonder if there's a faster way...
-    [dwi_dn.img]=signal_imgc{:};
-    
-    f.gr=0; %this was necessary to put into designer, but you could use f=[] if you wanted
-    folder_in_which_to_write=['/Users/andrew/re/test/probabilistic_test/NEWsim/sim' num2str(u)]; %CHANGE;
-    d2n2s_write(dwi_dn,folder_in_which_to_write,working_dwi_name,f)    
-    
-    
-    % COMMENTED BELOW WOULD BE THE "OPTIMAL" WAY TO DO IT THAT I COULDN'T
-    % GET WORKING
-    %call designer
-%     mkdir(['/Users/andrew/re/test/probabilistic_test/sim' num2str(u) filesep 'out'])
-%     command=['/Users/andrew/anaconda3/envs/des/bin/python /Users/andrew/bin/DKI-Designer/designer/designer.py -denoise -extent 5,5,5 -degibbs -rician -mask -prealign -smooth 1.25 -rpe_none -pe_dir j- -eddy -fit_constraints 0,1,0 -median -DKIparams -DTIparams  /Users/andrew/re/test/probabilistic_test/sim' num2str(u) '/dwi.nii /Users/andrew/re/test/probabilistic_test/sim' num2str(u) filesep 'out'];
-%     system(command)
-%     
-%     FT_parameters='/Users/andrew/re/test/probabilistic_test/ft_parameters.txt';
-%     dki_dt=['/Users/andrew/re/test/probabilistic_test/sim' num2str(u) filesep 'out/DT.mat'];
-%     dki_kt=['/Users/andrew/re/test/probabilistic_test/sim' num2str(u) filesep 'out/KT.mat'];
-%     dki_fa=['/Users/andrew/re/test/probabilistic_test/sim' num2str(u) filesep 'out/fa.nii'];
-%     kODF_nii_preprocess2(FT_parameters,dki_dt,dki_kt,dki_fa,['/Users/andrew/re/test/probabilistic_test/sim' num2str(u) filesep 'out/']); %I did EULER so I can check that and mrtrix out
-%     
-%     
-%     
-%     command=['tckgen -algorithm SD_STREAM -seed_image /Users/andrew/re/test/probabilistic_test/t1/wm_99thr.nii.gz -cutoff 0.1 /Users/andrew/re/test/probabilistic_test/sim' num2str(u) filesep 'out/SH_coeff.nii /Users/andrew/re/test/probabilistic_test/sim' num2str(u) filesep 'out/trackss_retry.tck -seeds 100000 -select 100000 -angle 60 -force'];
-%     system(command);
-    
-end
-all1=toc
-
-%my version
+%% create and write realizations
 tic
 
 noisefunc=@(im_noise,rand_img1,rand_img2) sqrt(2.*im_noise.^2).*(erfinv(2.*rand_img1-1) + 1i.*erfinv(2.*rand_img2-1));
@@ -132,14 +82,13 @@ for u = 1:nsim %this could probably be parallelized -- but passing signal_imgc i
     [dwi_dn.img]=signal_imgc{:,u};
     
     f.gr=0; %this was necessary to put into designer, but you could use f=[] if you wanted
-    folder_in_which_to_write{u}=['/Users/andrew/re/test/probabilistic_test/NEWsim/1sim' num2str(u) 'andrew']; %CHANGE;
+    folder_in_which_to_write{u}=fullfile(out_dir,['sim' num2str(u)]);
     d2n2s_write(dwi_dn,folder_in_which_to_write{u},working_dwi_name,f)    
     
 end
 
-
-
-all2=toc
+reall_time=toc;
+fprintf('Time to add noise and write realizations: ',num2str(reall_time))
 
 %% I forgot to do this before, but ya gotta denoise it again
 % I can just put it in the folder it was in before and use pick later
@@ -150,14 +99,14 @@ preppendd=@(x,str) fullfile(choose_output(@() fileparts(x),1),[str choose_output
 in=[working_dwi_name '.nii'];
 out=appendd(in,'_dn');
 cellfun(@(x) system(['dwidenoise ' fullfile(x,in) ' ' fullfile(x,out) ]),folder_in_which_to_write,'un',0)
-working_dwi_name=out;
+[~,working_dwi_name,~]=fileparts(out);
 
 %% just put it through DKE
 %% not super happy with the file handling going on here, it's just not pretty
 
 % dwis_preprocd=clean_dir(dir('/Users/andrew/re/test/probabilistic_test/sims4dke/*/out/dwi_designer.nii'));
 % dwis_preprocd=clean_dir(dir(['/Users/andrew/re/test/probabilistic_test/NEWsim/1sim*andrew/' working_dwi_name '.nii'])); %CHANGE; this should just grab the dwis created by the d2n2s_write command directly above; it matches any instance of folder_in_which_to_write
-dwis_preprocd=cellfun(@(x) fullfile(x,working_dwi_name),folder_in_which_to_write,'un',0)'; %this should just grab the dwis created by the d2n2s_write command directly above;
+dwis_preprocd=cellfun(@(x) fullfile(x,out),folder_in_which_to_write,'un',0)'; %this should just grab the dwis created by the d2n2s_write command directly above;
 %load into matlab
 for i=1:numel(dwis_preprocd)
 %     f.pick=fnify(dwis_preprocd(i));
@@ -166,8 +115,9 @@ for i=1:numel(dwis_preprocd)
 end
 
 
-in=working_dwi_name;
-out=preppendd(working_dwi_name,'dke_');
+in=out;
+out=preppendd(in,'dke_');
+working_dwi_name=preppendd(working_dwi_name,'dke_'); %just keeping the name separate from the nii.
 %make everything pretty the way DKE likes it
 for i=1:length(dwi_clean)
     %avg b0s
@@ -177,16 +127,17 @@ for i=1:length(dwi_clean)
     dwi_clean{i}(b0inds(2:end))=[]; 
     dwi_clean{i}(b0inds(1)).img=meanb0img;
     %remove the b0s bvectors for the grad file that will be made
-    dwi_clean{i}(b0inds(1)).bvec=[]; 
+%     dwi_clean{i}(b0inds(1)).bvec=[]; WE'RE NOT DOING THIS ANY MORE
+%     BECAUSE WE'RE NOT USING DKE ANYMORE
     %remove nan and inf
     for j=1:numel(dwi_clean{i})
         dwi_clean{i}(j).img(isnan(dwi_clean{i}(j).img)|isinf(dwi_clean{i}(j).img))=0;
     end
     %write files
-    d2n2s_write(dwi_clean{i},[folder_in_which_to_write{i} filesep 'dke'],out(1:end-4),[]) %cut off file extension on out. ; out was previously 
+    d2n2s_write(dwi_clean{i},[folder_in_which_to_write{i} filesep 'dke'],working_dwi_name,[]) %cut off file extension on out. ; out was previously 
    
 end
-working_dwi_name=out;
+
 % in=out;
 
 ft_params_template=['/Users/andrew/re/test/probabilistic_test/las_test/sim1_3/ft_parameters3.txt']; %CHANGE
@@ -202,16 +153,27 @@ system(['fslmaths ' mask_name ' -ero ' mask_name])
 mask_name=[mask_name '.gz'];
 
 for i=1:numel(dwis_preprocd)
-    delete(gcp('nocreate'))
-    %below is a version of dke that acts more like a function; values are
-    %assigned like ... option,value,option2,value2,...
-    dke_options('studydir',[folder_in_which_to_write{i} filesep 'dke'],'preprocess_options_fn_nii','dke_dwi.nii','ndir',ndirr,'fn_gradients',[folder_in_which_to_write{i} filesep 'dke' filesep 'dke_dwi.bvec'],'idx_gradients',{1:ndirr 1:ndirr},'T',35,'fwhm_img',[0 0 0])
-    delete(gcp('nocreate')) %not sure if this one is necessary
+
+    % actually just use mrtrix dwi2tensor
+    in_nii=[folder_in_which_to_write{i} filesep 'dke' filesep working_dwi_name '.nii'];
+    in_bval=[folder_in_which_to_write{i} filesep 'dke' filesep working_dwi_name '.bval'];
+    in_bvec=[folder_in_which_to_write{i} filesep 'dke' filesep working_dwi_name '.bvec'];
+    
+    out_DT=[folder_in_which_to_write{i} filesep 'dke' filesep 'DT' '.nii'];
+    out_KT=[folder_in_which_to_write{i} filesep 'dke' filesep 'KT' '.nii'];
+    
+    system(['dwi2tensor ' in_nii ' ' out_DT ' -dkt ' out_KT ' -fslgrad ' in_bvec ' ' in_bval])
+    
+    % tensor2metric or something else for at least fa
+    out_FA=[folder_in_which_to_write{i} filesep 'dke' filesep 'fa' '.nii'];
+    system(['tensor2metric ' out_DT ' -fa ' out_FA])
+    
+    %kODF for SH_coeff
     study_dirr=[folder_in_which_to_write{i} filesep 'dke'];
-    kODF_nii_preprocess2(ft_params_template,[study_dirr filesep 'DT.mat'],[study_dirr filesep 'KT.mat'],[study_dirr filesep 'fa.nii'],[study_dirr filesep],'/Users/andrew/re/test/probabilistic_test/sims4dke/b0_brain.nii.gz') % add seed mask but I think this applies only to Euler tracking?
-    % the only way in which kODF_nii_preprocess2 is different from the
+    kODF_nii_preprocess3(ft_params_template,out_DT,out_KT,out_FA,[study_dirr filesep],mask_name) % add seed mask but I think this applies only to Euler tracking?
+    % the only way in which kODF_nii_preprocess3 is different from the
     % orignal is in that it takes in a studydir which overwrites the ft
-    % parameters studydir value. Just so i didn't have to write a bunch of
+    % parameters studydir value. (same with seed mask) Just so i didn't have to write a bunch of
     % ft_parameterses
 end
 
