@@ -1,4 +1,4 @@
-function prob_deterministic_tracking(dwi_folder,noise_folder,out_dir,ft_params_template,seed_mask,nsim,atlas4connectome)
+function prob_deterministic_tracking(dwi_folder,noise_folder,out_dir,ft_params_template,seed_mask,nsim,atlas4connectome,fn_t1)
 
 ft_params_template=['/Users/andrew/re/test/probabilistic_test/las_test/sim1_3/ft_parameters3.txt']; %comment this once you make a centralized package repo
 seed_mask='/Users/andrew/re/test/probabilistic_test/t1/other/wm_99thr.nii.gz'; %comment this once you get ur shit together
@@ -44,10 +44,8 @@ out_dir=char(out_dir);
 [a,b,~]=fileparts(out_dir);
 out_dir=fullfile(a,b);
 
-%% begin t1 processing
-
-
-%% begin DWI processing
+%% read DWIs
+% FUTURE -- add support for multiple input folders
 
 %read
 ff.b0=0;
@@ -74,8 +72,63 @@ dwi_dn_img=reshape(dwi_dn_img,[],nvol);
 % nSim_total=20;
 % nsim=10;
 
-% if you wanted to use emilie's tracts
-% addpath('/Users/andrew/bin/nii_preprocess2/nii_preprocess/DKI_tractography')
+%% begin t1 processing
+% better to ask for t1 than folder bc t1 metadata isn't required.
+%   This goes here instead of beginning bc DWI is loaded now.
+
+% optional: reg mni to t1 before t1 is downsampled?
+
+% note: if the origin of t1 or dwi is whacky, this could cut of some of the
+% t1 image. might want to reset origin to center of mass in the future
+
+% load t1
+ft1.pick=fn_t1;
+ft1.b0=0; %don't try to assign b0 metadata
+ft1.no='bvecbvaljsonfn';
+t1=d2n2s(fileparts(fn_t1),ft1);
+
+% coreg t1 to dwi
+% find first b0
+b0_ind_first=paren(find([dwi_dn.bval]<60),1); % get the ind of the first b0
+
+%perform coreg on images in workspace
+t1=coregister_obj_no_reslice(dwi_dn(b0_ind_first),t1); % Orientation matrix is changed to align with dwi_dn, but t1 raw data is not changed. (We want full resolution for 5ttgen).
+
+%write
+rt1=fullfile(out_dir,'t1_align_with_diff.nii');
+[a,b,~]=fileparts(rt1);
+d2n2s_write(t1,a,b,[])
+
+%% 5ttgen (and atlas preproc?)
+
+% NOTE TO SELF I should keep some of the temp dir output bc getting a mask
+% from this part would be best.
+
+% run 5ttgen
+out_5tt=fullfile(out_dir,'5tt.nii'); %I'm not losing anything by using nii and not mif right
+system(['5ttgen fsl '...
+    rt1 ' '... %in-t1 aligned with diff
+    out_5tt ' '... % out-segmentations aligned with diff
+    '-nocleanup -force'])
+
+% get a mask output -- note that this might not work as intended if you
+% have multiple temp directories in this folder.
+temp_dir=clean_dir(dir('./5ttgen-tmp*'));
+mask_name=[fnify2(temp_dir) filesep 'T1_BET.nii.gz']; %this betted image is output by mrtrix
+movefile(mask_name,[out_dir filesep 'T1_BET.nii.gz']) %move the image out of the temp directory
+rmdir(fnify2(temp_dir),'s');
+
+% get gmwmi
+gmwmi_mask=[out_dir filesep 'gmwmi_mask.nii'];
+system(['5tt2gmwmi '...
+    out_5tt ' '...
+    gmwmi_mask])
+
+% we're done with T1s for now -- we wanted to set up for tractography later, so we
+% need to prepare DWIs
+
+
+%% begin DWI sim and processing
 
 %make a big ole matrix of random numbers
 randomm=rand(prod(dwi_size),nvol,nsim,2);
@@ -93,7 +146,7 @@ signal=abs(dwi_dn_img+sim_noise_img);%signal is now all blowed out in the three 
 signal_img = reshape(signal,[dwi_size,nvol,nsim]);
 signal_imgc=squeeze(num2cell(signal_img,[1 2 3])); %wonder if there's a faster way...
 
-
+folder_in_which_to_write=cell(nsim,1);
 for u = 1:nsim %this could probably be parallelized -- but passing signal_imgc into the loop would be annoying overhead. Should just make a variable for each segment I think.
     
     fprintf('\n simulation andrew ver #%03d \n',u)
@@ -167,16 +220,20 @@ end
 % numb2=find(abs([dwi_clean{i}.bval]-2000)<100);
 % ndirr=[numel(numb1),numel(numb2)]; 
 
+%% MASKING replaced with t1 masking. 
+% This section could come into play again tho if we want to add a DWI only (no T1) option
+
 % make a mask for each realization. should probably be a little less
 % stringent
-for i=1:nsim
-    mask_name{i}=[folder_in_which_to_write{i} filesep 'dke' filesep 'b0.nii'];
-    system(['bet ' folder_in_which_to_write{i} filesep 'dke' filesep working_dwi_name ' ' mask_name{i} ' -n -m -f .55'])
-    mask_name{i}=appendd(mask_name{i},'_mask'); % bet does this for some reason
-    system(['fslmaths ' mask_name{i} ' -ero ' mask_name{i}])
-    mask_name{i}=[mask_name{i} '.gz'];
-end
+% for i=1:nsim
+%     mask_name{i}=[folder_in_which_to_write{i} filesep 'dke' filesep 'b0.nii'];
+%     system(['bet ' folder_in_which_to_write{i} filesep 'dke' filesep working_dwi_name ' ' mask_name{i} ' -n -m -f .55'])
+%     mask_name{i}=appendd(mask_name{i},'_mask'); % bet does this for some reason
+%     system(['fslmaths ' mask_name{i} ' -ero ' mask_name{i}])
+%     mask_name{i}=[mask_name{i} '.gz'];
+% end
 
+%% get tensors, metrics, SH, and track.
 for i=1:numel(dwis_preprocd)
 
     % actually just use mrtrix dwi2tensor
@@ -208,7 +265,13 @@ for i=1:numel(dwis_preprocd)
     %now just integrate the following command into this pipeline
     
     out_tracks=[folder_in_which_to_write{i} filesep 'dke' filesep 'tracks.tck'];
-    command=['tckgen -algorithm SD_STREAM -seed_image ' seed_mask ' -cutoff 0.1 ' out_SH ' ' out_tracks ' -seeds 10000 -select 10000 -angle 60 -force'];
+%     command=['tckgen -algorithm SD_STREAM -seed_image ' seed_mask ' -cutoff 0.1 ' out_SH ' ' out_tracks ' -seeds 10000 -select 10000 -angle 60 -force'];
+    command=['tckgen -algorithm SD_STREAM -seed_image ' gmwmi_mask ' -mask ' mask_name ' ' out_SH ' ' out_tracks ' -cutoff 0.1 -seeds 10000 -select 10000 -angle 60 -force'];
+%     command=['tckgen -algorithm SD_STREAM -seed_image ' gmwmi_mask ' ' out_SH ' ' out_tracks ' -cutoff 0.1 -seeds 10000 -select 10000 -angle 60 -force'];
+
+% just tested this all lightly -- masking with t1 is fine. gmwmi_mask
+% seeding is fine. wm99thresh seeding is fine. they seem similar. but -cutoff 0.05
+% make the tracts look gross.
     system(command)
     
 end
@@ -231,7 +294,44 @@ system(['tckedit '...
     out_dir filesep out_tract_name]);
 
 %% use tck2connectome to get connectomes
-out_connectome=[out_dir filesep 'connectome.csv'];
+%warp MNI to T1_in_diffusion and atlas along with
+
+% I SHOULD DEFINITELY MAKE SOME OF THESE THINGS FUNCTIONS
+
+%put mni temp in folder
+mni_brain_template='/usr/local/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz'; %gonna have to find this robustly, perhaps using rorden tools
+copyfile(mni_brain_template,[out_dir filesep 'mnit1.nii.gz'])
+mni_brain_template=[out_dir filesep 'mnit1.nii.gz'];
+
+%gunzip mni temp
+try gunzip(mni_brain_template);catch;end
+mni_brain_template=strrep(mni_brain_template,'.gz','');
+
+%gunzip mask
+try gunzip(mask_name); catch;end
+mask_name=strrep(mask_name,'.gz','');
+
+%put atlas in folder, gunzip if necessary
+[~,b,c]=fileparts(atlas4connectome);
+copyfile(atlas4connectome,[out_dir filesep b c]);
+atlas4connectome=[out_dir filesep b c];
+
+%gunzip atlas 
+try gunzip(atlas4connectome); catch;end
+atlas4connectome=strrep(atlas4connectome,'.gz','');
+
+oldNormSub({mni_brain_template,atlas4connectome},mask_name,8,10,0); %using nearest neighbor bc labels
+
+%delete moved MNI image
+[a,b,c]=fileparts(mni_brain_template);
+delete([a filesep 'w' b c])
+
+%change working name of atlas you moved
+[a,b,c]=fileparts(atlas4connectome);
+atlas4connectome=[a filesep 'w' b c];
+
+
+out_connectome=[out_dir filesep 'connectome_myc1.csv'];
 if exist('atlas4connectome','var') && ~isempty(atlas4connectome) && exist(atlas4connectome,'file')
     system(['tck2connectome '...
         out_dir filesep out_tract_name ' '...
@@ -807,3 +907,30 @@ end
 % end
 % fprintf('IS finished')
 % toc
+
+function oldNormSub(src, tar, smoref, reg, interp)
+% usage: oldNormSub(blah1,blah2,8,10,1)
+%coregister T2 to match T1 image, apply to lesion
+if isempty(src) || isempty(tar), return; end
+if ~exist('smoref','var'), smoref = 0; end
+if ~exist('reg','var'), reg = 1; end
+if ~exist('interp','var'), interp = 1; end
+matlabbatch{1}.spm.tools.oldnorm.estwrite.subj.source = src(1);
+matlabbatch{1}.spm.tools.oldnorm.estwrite.subj.wtsrc = '';
+matlabbatch{1}.spm.tools.oldnorm.estwrite.subj.resample = src(:);
+matlabbatch{1}.spm.tools.oldnorm.estwrite.eoptions.template = {tar};
+matlabbatch{1}.spm.tools.oldnorm.estwrite.eoptions.weight = '';
+matlabbatch{1}.spm.tools.oldnorm.estwrite.eoptions.smosrc = 8;
+matlabbatch{1}.spm.tools.oldnorm.estwrite.eoptions.smoref = smoref; % <-- !!!
+matlabbatch{1}.spm.tools.oldnorm.estwrite.eoptions.regtype = 'mni';
+matlabbatch{1}.spm.tools.oldnorm.estwrite.eoptions.cutoff = 25;
+matlabbatch{1}.spm.tools.oldnorm.estwrite.eoptions.nits = 16;
+matlabbatch{1}.spm.tools.oldnorm.estwrite.eoptions.reg = reg;
+matlabbatch{1}.spm.tools.oldnorm.estwrite.roptions.preserve = 0;
+matlabbatch{1}.spm.tools.oldnorm.estwrite.roptions.bb = [nan nan nan; nan nan nan];%[-78 -112 -70; 78 76 85];
+matlabbatch{1}.spm.tools.oldnorm.estwrite.roptions.vox = [nan nan nan];%[1 1 1];
+matlabbatch{1}.spm.tools.oldnorm.estwrite.roptions.interp = interp;
+matlabbatch{1}.spm.tools.oldnorm.estwrite.roptions.wrap = [0 0 0];
+matlabbatch{1}.spm.tools.oldnorm.estwrite.roptions.prefix = 'w';
+spm_jobman('run',matlabbatch);
+end
