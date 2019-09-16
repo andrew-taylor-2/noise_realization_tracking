@@ -1,9 +1,8 @@
-function prob_deterministic_tracking(dwi_folder,noise_folder,out_dir,ft_params_template,seed_mask,nsim,atlas4connectome,fn_t1)
+function prob_deterministic_tracking(dwi_folder,noise_folder,out_dir,nsim,atlas4connectome,fn_t1)
 
-ft_params_template=['/Users/andrew/re/test/probabilistic_test/las_test/sim1_3/ft_parameters3.txt']; %comment this once you make a centralized package repo
-seed_mask='/Users/andrew/re/test/probabilistic_test/t1/other/wm_99thr.nii.gz'; %comment this once you get ur shit together
+ft_params_template=[fileparts(which(mfilename)) filesep 'ft_parameters.txt']; 
+
 %% the setup
-
 paren=@(x,varargin) x(varargin{:});
 fnify=@(x) [x.folder filesep x.name]; % I should use fnify2 if anything
 curly=@(x,varargin) x{varargin{:}};
