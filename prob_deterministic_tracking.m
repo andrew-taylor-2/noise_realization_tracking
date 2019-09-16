@@ -5,7 +5,7 @@ seed_mask='/Users/andrew/re/test/probabilistic_test/t1/other/wm_99thr.nii.gz'; %
 %% the setup
 
 paren=@(x,varargin) x(varargin{:});
-fnify=@(x) [x.folder filesep x.name];
+fnify=@(x) [x.folder filesep x.name]; % I should use fnify2 if anything
 curly=@(x,varargin) x{varargin{:}};
 
 % NOTES FOR RUNNING:
@@ -93,6 +93,7 @@ b0_ind_first=paren(find([dwi_dn.bval]<60),1); % get the ind of the first b0
 
 %perform coreg on images in workspace
 t1=coregister_obj_no_reslice(dwi_dn(b0_ind_first),t1); % Orientation matrix is changed to align with dwi_dn, but t1 raw data is not changed. (We want full resolution for 5ttgen).
+%change to main coregister_obj script
 
 %write
 rt1=fullfile(out_dir,'t1_align_with_diff.nii');
@@ -107,8 +108,8 @@ d2n2s_write(t1,a,b,[])
 % run 5ttgen
 out_5tt=fullfile(out_dir,'5tt.nii'); %I'm not losing anything by using nii and not mif right
 system(['5ttgen fsl '...
-    rt1 ' '... %in-t1 aligned with diff
-    out_5tt ' '... % out-segmentations aligned with diff
+    rt1 ' '... %in: t1 aligned with diff
+    out_5tt ' '... % out: segmentations aligned with diff
     '-nocleanup -force'])
 
 % get a mask output -- note that this might not work as intended if you
@@ -299,7 +300,7 @@ system(['tckedit '...
 % I SHOULD DEFINITELY MAKE SOME OF THESE THINGS FUNCTIONS
 
 %put mni temp in folder
-mni_brain_template='/usr/local/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz'; %gonna have to find this robustly, perhaps using rorden tools
+mni_brain_template='/usr/local/fsl/data/standard/MNI152_T1_1mm.nii.gz'; %gonna have to find this robustly, perhaps using rorden tools
 copyfile(mni_brain_template,[out_dir filesep 'mnit1.nii.gz'])
 mni_brain_template=[out_dir filesep 'mnit1.nii.gz'];
 
@@ -307,12 +308,12 @@ mni_brain_template=[out_dir filesep 'mnit1.nii.gz'];
 try gunzip(mni_brain_template);catch;end
 mni_brain_template=strrep(mni_brain_template,'.gz','');
 
-%gunzip mask
-try gunzip(mask_name); catch;end
-mask_name=strrep(mask_name,'.gz','');
+% %gunzip mask % why was I doing this...
+% try gunzip(mask_name); catch;end
+% mask_name=strrep(mask_name,'.gz','');
 
 %put atlas in folder, gunzip if necessary
-[~,b,c]=fileparts(atlas4connectome);
+[~,b,c]=fileparts(atlas4connectome); %this atlas should be in mni space...
 copyfile(atlas4connectome,[out_dir filesep b c]);
 atlas4connectome=[out_dir filesep b c];
 
@@ -320,7 +321,9 @@ atlas4connectome=[out_dir filesep b c];
 try gunzip(atlas4connectome); catch;end
 atlas4connectome=strrep(atlas4connectome,'.gz','');
 
-oldNormSub({mni_brain_template,atlas4connectome},mask_name,8,10,0); %using nearest neighbor bc labels
+% oldNormSub({mni_brain_template,atlas4connectome},mask_name,8,10,0); %I
+% had this line previously... don't know why?
+oldNormSub({mni_brain_template,atlas4connectome},rt1,8,10,0); %using nearest neighbor bc labels
 
 %delete moved MNI image
 [a,b,c]=fileparts(mni_brain_template);
