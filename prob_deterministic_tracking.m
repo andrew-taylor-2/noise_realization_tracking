@@ -28,18 +28,24 @@ function prob_deterministic_tracking(dwi_folder,out_dir,nsim,atlas4connectome,t1
 
 
 %% give anonymous functions to everyone
-% is it really necessary tho
 
-paren=@(x,varargin) x(varargin{:});
-curly=@(x,varargin) x{varargin{:}};
-append=@(x,str) fullfile(choose_output(@() fileparts(x),1),[choose_output(@() fileparts(x),2) str choose_output(@() fileparts(x),3)]); %changed slightly so that you don't need path
-prepend=@(x,str) fullfile(choose_output(@() fileparts(x),1),[str choose_output(@() fileparts(x),2) choose_output(@() fileparts(x),3)]); %changed slightly so that you don't need path
+%inline conditional
+iif = @(varargin) varargin{2 * find([varargin{1:2:end}], 1, 'first')}();
 
-do.paren=paren;
-do.curly=curly;
-do.appendd=append;
-do.prepend=prepend;
+%index even unnamed expressions
+do.paren=@(x,varargin) x(varargin{:});
+do.curly=@(x,varargin) x{varargin{:}};
 
+%add onto a filename
+do.append=@(x,str) fullfile(choose_output(@() fileparts(x),1),[choose_output(@() fileparts(x),2) str choose_output(@() fileparts(x),3)]);
+do.prepend=@(x,str) fullfile(choose_output(@() fileparts(x),1),[str choose_output(@() fileparts(x),2) choose_output(@() fileparts(x),3)]);
+
+%do something and return the out name
+do.move_and_rename=@(in,out) do.curly({movefile(in,out),out},2);
+do.copy_and_rename=@(in,out) do.curly({copyfile(in,out),out},2);
+do.gunzip_and_rename=@(in) iif( ~ischar(in) || numel(in)<4,  @() do.curly({in, warning('invalid gunzip input,returning in unchanged')},1), ... %warningfor invalid inputs
+                                strcmp(in(end-2:end),'.gz'), @() do.curly({gunzip(in), in(1:end-3)},2), ... % if it's named gz gunzip and return out name
+                                true,                        @() in); % if it's not just return the in name
 
 %% sanitize inputs and give errors early if at all
 
@@ -49,7 +55,7 @@ end
 
 %make sure out_dir makes sense. if it doesn't exist, it'll be made when
 %images are written
-assert(exist('out_dir','var'))
+assert(logical(exist('out_dir','var')))
 out_dir=char(out_dir);
 [a,b,~]=fileparts(out_dir); %this does preclude using folders that contain a period...
 out_dir=fullfile(a,b);
@@ -58,15 +64,32 @@ out_dir=fullfile(a,b);
 
 [folder_in_which_to_write,working_dwi_name,dwi_first_b0]=denoise_and_create_sims(dwi_folder, out_dir, nsim, do)
 
-[rt1,gmwmi_mask,mask_name,out_5tt]=t1_preproc(t1_folder, dwi_first_b0, out_dir)
+try
+    [~,gmwmi_mask,mask_name,~]=t1_preproc(t1_folder, dwi_first_b0, out_dir)
+catch
+%     outs={t1_folder,dwi_first_b0,out_dir}
+    save('had_error.mat')
+    return
+end
 
-
-[folder_in_which_to_write,working_dwi_name]=preproc_func_handle(folder_in_which_to_write, working_dwi_name, mask_name,do) % this is kind of a stand in for what the pydesigner pipeline will eventually be
+try
+    [folder_in_which_to_write,~]=preproc_func_handle(folder_in_which_to_write, working_dwi_name, mask_name,do) % this is kind of a stand in for what the pydesigner pipeline will eventually be
 % if you wanted to use this as is, you could make a wrapper for py designer
 % that just parses input and output file names and hands them to system.
 % Also, here preproc_func_handle isn't an input, but it could be.
+catch
+%     outs={folder_in_which_to_write, working_dwi_name, mask_name,do}
+    save('had_error.mat')
+    return
+end
 
-track_each(folder_in_which_to_write, mask_name, gmwmi_mask ,atlas4connectome)
+try
+    track_each(folder_in_which_to_write, mask_name, gmwmi_mask ,atlas4connectome)
+catch
+%     outs={folder_in_which_to_write, mask_name, gmwmi_mask ,atlas4connectome}
+    save('had_error.mat')
+    return
+end
 
 end
 
@@ -75,7 +98,7 @@ end
 
 
 
-function [folder_in_which_to_write,dwi_first_b0,working_dwi_name]=denoise_and_create_sims(dwi_folder,out_dir,nsim,do)
+function [folder_in_which_to_write,working_dwi_name,dwi_first_b0]=denoise_and_create_sims(dwi_folder,out_dir,nsim,do)
 
 %% read DWIs
 % FUTURE -- add support for multiple input folders
@@ -93,7 +116,7 @@ dwi_init=d2n2s(dwi_folder, make_flags('read', 'no','bvecbvalimgjson' )); %kind o
 %-----
 
 % get noise
-mrtrix_denoise(dwi_init(1).fns.nii,'_dn')
+mrtrix_denoise(dwi_init(1).fns.nii,'_dn') %this should take in an out dir in the future
 
 %out names
 noise_out_name=fullfile(dwi_folder,'noise.nii');
@@ -171,7 +194,7 @@ end
 
 
 
-function [rt1,gmwmi_mask,mask_name,out_5tt]=t1_preproc(t1_folder,dwi_first_b0,out_dir)
+function [rt1,gmwmi_mask,mask_name,out_5tt]=t1_preproc(t1_folder,dwi_first_b0,out_dir,do)
 %% begin t1 processing
 % better to ask for t1 than folder bc t1 metadata isn't required.
 %   This goes here instead of beginning bc DWI is loaded now.
@@ -204,13 +227,29 @@ system(['5ttgen fsl '...
     '-nocleanup -force'])
 
 % get a mask output 
-temp_dir=clean_dir(dir('./5ttgen-tmp*'));
+temp_dir=clean_dir(dir('./5ttgen-tmp*')); %DONT use clean_dir
 %grab the most recent folder that matches this pattern
 temp_dir=temp_dir(output(@() max(cat(1,temp_dir.datenum)),2)); 
 
+%grab mask name
 mask_name=[fnify2(temp_dir) filesep 'T1_BET.nii.gz']; %this betted image is output by mrtrix
-movefile(mask_name,[out_dir filesep 'T1_BET.nii.gz']) %move the image out of the temp directory
+
+%move and gunzip
+mask_name=do.move_and_rename(mask_name,[out_dir filesep 'T1_BET.nii.gz']);
+mask_name=do.gunzip_and_rename(mask_name);
+
+%remove the directory
 rmdir(fnify2(temp_dir),'s');
+
+%reslice t1 bet into diffusion
+t1_bet=d2n2s(fileparts(mask_name),make_flags('read', 'pick',mask_name, 'no','bvalbvecjson'));
+t1_bet=coregister_obj(dwi_first_b0,t1_bet,make_flags('coregister', 'apply',-1));
+
+%NEED TO ADD WRITING CODE AND REASSIGN MASK NAME
+
+% it's annoying this is necessary, but the mrtrix metric and tensor
+% commands need a mask that's resliced to diffusion space. at least we get a little
+% speed up bc dwi_first_b0 is loaded
 
 % get gmwmi
 gmwmi_mask=[out_dir filesep 'gmwmi_mask.nii'];
@@ -327,17 +366,14 @@ copyfile(mni_brain_template,[out_dir filesep 'mnit1.nii.gz'])
 mni_brain_template=[out_dir filesep 'mnit1.nii.gz'];
 
 %gunzip mni temp
-try gunzip(mni_brain_template);catch;end
-mni_brain_template=strrep(mni_brain_template,'.gz','');
+mni_brain_template=do.gunzip_and_rename(mni_brain_template);
 
 %put atlas in folder, gunzip if necessary
 [~,b,c]=fileparts(atlas4connectome); %this atlas should be in mni space...
-copyfile(atlas4connectome,[out_dir filesep b c]);
-atlas4connectome=[out_dir filesep b c];
+atlas4connectome=do.copy_and_rename(atlas4connectome,[out_dir filesep b c]);
 
 %gunzip atlas 
-try gunzip(atlas4connectome); catch;end
-atlas4connectome=strrep(atlas4connectome,'.gz','');
+atlas4connectome=do.gunzip_and_rename(atlas4connectome);
 
 %normalize atlas to match rt1 using the MNI->rt1 transform
 oldNormSub({mni_brain_template,atlas4connectome},rt1,8,10,0); %using nearest neighbor bc labels
