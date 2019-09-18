@@ -1,4 +1,4 @@
-function prob_deterministic_tracking(dwi_folder,out_dir,nsim,atlas4connectome,t1_folder,preproc_func_handle2)
+function prob_deterministic_tracking(dwi_folder,out_dir,nsim,atlas4connectome,t1_folder)
 %function is in a weird state because I'm trying to make this more modular
 
 % NOTES FOR RUNNING:
