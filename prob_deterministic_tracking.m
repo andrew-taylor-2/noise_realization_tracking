@@ -56,17 +56,17 @@ out_dir=fullfile(a,b);
 
 %% MAIN
 
-[folder_in_which_to_write,working_dwi_name,dwi_first_b0]=denoise_and_create_sims(dwi_folder,out_dir,nsim,do)
+[folder_in_which_to_write,working_dwi_name,dwi_first_b0]=denoise_and_create_sims(dwi_folder, out_dir, nsim, do)
 
-[rt1,gmwmi_mask,mask_name,out_5tt]=t1_preproc(t1_folder,dwi_first_b0,out_dir)
+[rt1,gmwmi_mask,mask_name,out_5tt]=t1_preproc(t1_folder, dwi_first_b0, out_dir)
 
 
-[folder_in_which_to_write,working_dwi_name]=preproc_func_handle(folder_in_which_to_write,working_dwi_name,do) % this is kind of a stand in for what the pydesigner pipeline will eventually be
+[folder_in_which_to_write,working_dwi_name]=preproc_func_handle(folder_in_which_to_write, working_dwi_name, mask_name,do) % this is kind of a stand in for what the pydesigner pipeline will eventually be
 % if you wanted to use this as is, you could make a wrapper for py designer
 % that just parses input and output file names and hands them to system.
 % Also, here preproc_func_handle isn't an input, but it could be.
 
-[]=track_each(folder_in_which_to_write,working_dwi_name,mask_name,gmwmi_mask)
+track_each(folder_in_which_to_write, mask_name, gmwmi_mask ,atlas4connectome)
 
 end
 
@@ -85,15 +85,16 @@ function [folder_in_which_to_write,dwi_first_b0,working_dwi_name]=denoise_and_cr
 %---
 
 %read
-ff.no='bvecbvalimgjson';
-dwi_init=d2n2s(dwi_folder,ff); %kind of a roundabout way of getting a filename but whatever
+
+dwi_init=d2n2s(dwi_folder, make_flags('read', 'no','bvecbvalimgjson' )); %kind of a roundabout way of getting a filename but whatever
 
 %-----
 %NOISE
 %-----
 
 % get noise
-[out1,out2]=mrtrix_denoise(dwi_init(1).fns.nii,'_dn') %blanks are shell and exe. no need for outs really
+mrtrix_denoise(dwi_init(1).fns.nii,'_dn')
+
 %out names
 noise_out_name=fullfile(dwi_folder,'noise.nii');
 denoised_dwi_name=do.append(dwi_init(1).fns.nii,'_dn');
@@ -108,8 +109,8 @@ noise_img=reshape(noise_img,[],1);
 %------
 %DWI_DN
 %------
-ffdn.pick=denoised_dwi_name;
-dwi_dn=d2n2s(dwi_folder,ffdn);
+%grab the denoised image
+dwi_dn=d2n2s(dwi_folder,make_flags('read','pick',denoised_dwi_name));
 
 %sizes
 nvol=numel(dwi_dn);
@@ -120,7 +121,7 @@ dwi_dn_img=cat(4,dwi_dn.img);
 dwi_dn_img=reshape(dwi_dn_img,[],nvol);
 
 %grab the first for t1 alignment
-dwi_first_b0=dwi_dn(do.paren(find([dwi_dn.bval]<101),1)); %grabs the first b0
+dwi_first_b0=dwi_dn(do.paren(find([dwi_dn.bval]<101),1)); %#ok<FNDSB> %grabs the first b0
 
 
 %% begin DWI sim and processing
@@ -134,60 +135,38 @@ working_dwi_name='dwi';
 %% create and write realizations
 tic
 
+%inject the noise function supplied by Jens/Hunter with random array. 
+%I think we're creating Gaussian noise here?
 noisefunc=@(im_noise,rand_img1,rand_img2) sqrt(2.*im_noise.^2).*(erfinv(2.*rand_img1-1) + 1i.*erfinv(2.*rand_img2-1));
 sim_noise_img=noisefunc(noise_img,randomm(:,:,:,1),randomm(:,:,:,2));
 
-signal=abs(dwi_dn_img+sim_noise_img);%signal is now all blowed out in the three d: voxels by volumes by nsims
+%signal dims are voxels by volumes by nsims
+signal=abs(dwi_dn_img+sim_noise_img);
+
+% now we make signal image back into xyz dims to be written
 signal_img = reshape(signal,[dwi_size,nvol,nsim]);
 signal_img = squeeze(num2cell(signal_img,[1 2 3])); %reassigning to same variable name to keep memory usage lower
 
 folder_in_which_to_write=cell(nsim,1);
-for u = 1:nsim %this could probably be parallelized -- but passing signal_imgc into the loop would be annoying overhead. Should just make a variable for each segment I think.
+for u = 1:nsim %this might be parallelizable? Would Matlab know to delegate only part of signal_img to each worker?
     
     fprintf('\n simulation andrew ver #%03d \n',u)
 
+    %put signal back inside ur object for writing
     [dwi_dn.img]=signal_img{:,u};
     
-    f.gr=0; %this was necessary to put into designer, but you could use f=[] if you wanted
+    %write
     folder_in_which_to_write{u}=fullfile(out_dir,['sim' num2str(u)]);
-    d2n2s_write(dwi_dn,folder_in_which_to_write{u},working_dwi_name,f)    
+    d2n2s_write( dwi_dn, folder_in_which_to_write{u}, working_dwi_name, make_flags('write','gr',0) )
     
 end
 
+%how long did it all take?
 reall_time=toc;
 fprintf('Time to add noise and write realizations: %s',num2str(reall_time))
 
 end
 
-
-
-function [folder_in_which_to_write,working_dwi_name]=preproc_func_handle(folder_in_which_to_write,working_dwi_name,do)
-%% I forgot to do this before, but ya gotta denoise it again
-% I can just put it in the folder it was in before and use pick later
-
-%in and out name for denoising
-in=[working_dwi_name '.nii'];
-out=do.append(in,'_dn');
-[~,working_dwi_name,~]=fileparts(out);
-
-%denoise and get the output names
-dn_and_give_out_name=@(x) do.curly({system(['dwidenoise ' fullfile(x,in) ' ' fullfile(x,out)]) , fullfile(x,out)},2);
-dwis_preprocd=cellfun(dn_and_give_out_name,folder_in_which_to_write,'un',0);
-
-%just grab these and write to the out folder (the use of d2n2s is justified
-%here IMO bc it wraps 4 dir calls and 4 writes)
-for i=1:numel(dwis_preprocd)
-%     f.pick=fnify(dwis_preprocd(i));
-    f.pick=dwis_preprocd{i};
-    f.no='bvalbvecjsonimg'; %only need to load header
-    f.gr=0;
-    dwi_clean=d2n2s(folder_in_which_to_write{i},f);
-    move_obj_files(dwi_clean,fullfile(folder_in_which_to_write{i},'dke'),working_dwi_name); %I skipped dke, but I still wanna copy the files into a "dke" folder for neatness
-    folder_in_which_to_write{i}=fullfile(folder_in_which_to_write{i},'dke'); %after preproc, things should be going in the "final" folder with diffusion metrics and eventually tract outputs
-end
-
-
-end
 
 
 
@@ -203,18 +182,11 @@ function [rt1,gmwmi_mask,mask_name,out_5tt]=t1_preproc(t1_folder,dwi_first_b0,ou
 % t1 image. might want to reset origin to center of mass in the future
 
 % load t1
-% need to sanitize inputs more
-ft1.b0=0; %don't try to assign b0 metadata
-ft1.no='bvecbvaljsonfn';
-t1=d2n2s(t1_folder,ft1);
+t1=d2n2s(t1_folder,make_flags('read', 'b0',0, 'no','bvecbvaljsonfn'));
 
 % coreg t1 to dwi
-% find first b0
-% b0_ind_first=paren(find([dwi_dn.bval]<60),1); % get the ind of the first b0
-
-%perform coreg on images in workspace
-ft2.apply=1; %only estimate the registration and update the t1's header -- don't reslice the T1
-t1=coregister_obj(dwi_first_b0,t1,ft2); % Orientation matrix is changed to align with dwi_dn, but t1 raw data is not changed. (We want full resolution for 5ttgen).
+% Orientation matrix is changed to align with dwi_dn, but t1 raw data is not changed. (We want full resolution for 5ttgen).
+t1=coregister_obj(dwi_first_b0,t1,make_flags('coregister', 'apply',1));
 
 
 %write
@@ -252,19 +224,41 @@ system(['5tt2gmwmi '...
 end
 
 
+function [folder_in_which_to_write,working_dwi_name,out_DT,out_KT,out_FA]=preproc_func_handle(folder_in_which_to_write,working_dwi_name,mask_name,do)
+%% Do some preprocessing
+% I can just put it in the folder it was in before and use pick later
 
-function []=track_each(folder_in_which_to_write,working_dwi_name,mask_name,gmwmi_mask)
-%% get tensors, metrics, SH, and track.
-ft_params_template=[fileparts(which(mfilename)) filesep 'ft_parameters.txt']; %just look in the same folder as this function for the template
+%in and out name for denoising
+in=[working_dwi_name '.nii'];
+out=do.append(in,'_dn');
+[~,working_dwi_name,~]=fileparts(out);
 
-for i=1:numel(folder_in_which_to_write)
+%denoise and get the output names
+dn_and_give_out_name=@(x) do.curly({system(['dwidenoise ' fullfile(x,in) ' ' fullfile(x,out)]) , fullfile(x,out)},2);
+dwis_preprocd=cellfun(dn_and_give_out_name,folder_in_which_to_write,'un',0);
 
+%just grab these and write to the out folder (the use of d2n2s is justified
+%here IMO bc it wraps 4 dir calls and 4 writes)
+for i=1:numel(dwis_preprocd)
+
+    %% move to final dir
+    %grab image names for move
+    dwi_clean=d2n2s(folder_in_which_to_write{i}, make_flags('read','pick',dwis_preprocd{i},'no','bvalbvecjsonimg') );
+    
+    %after preproc, things should be going in the "final" folder with diffusion metrics and eventually tract outputs
+    move_obj_files(dwi_clean,fullfile(folder_in_which_to_write{i},'dke'),working_dwi_name);
+    
+    
+    %update the folder in which to write
+    folder_in_which_to_write{i}=fullfile(folder_in_which_to_write{i},'dke');
+
+%% get diffusion metrics
     % define in and out names
     in=[folder_in_which_to_write{i} filesep working_dwi_name];
     in_nii=[in '.nii'];
     in_bval=[in '.bval'];
     in_bvec=[in '.bvec'];
-    
+        
     out_DT=[fileparts(in) filesep 'DT.nii'];
     out_KT=[fileparts(in) filesep 'KT.nii'];
     
@@ -275,18 +269,27 @@ for i=1:numel(folder_in_which_to_write)
     % designer in the future
     out_FA=[fileparts(in) filesep 'fa.nii'];
     system(['tensor2metric ' out_DT ' -fa ' out_FA  ' -mask ' mask_name])
+
+end
+
+
+end
+
+
+
+function track_each(folder_in_which_to_write,out_DT,out_KT,out_FA,mask_name,gmwmi_mask,atlas4connectome)
+%% get tensors, metrics, SH, and track.
+ft_params_template=[fileparts(which(mfilename)) filesep 'ft_parameters.txt']; %just look in the same folder as this function for the template
+
+for i=1:numel(folder_in_which_to_write)
     
     %kODF for SH_coeff
     study_dirr=fileparts(in);
     out_SH=[folder_in_which_to_write{i} filesep 'dke' filesep 'SH_coeff.nii']; 
     out_tracks=[folder_in_which_to_write{i} filesep 'dke' filesep 'tracks.tck'];
     
+    %kODF..3 extends kODF... to take studydir and mask as inputs
     kODF_nii_preprocess3(ft_params_template,out_DT,out_KT,out_FA,[study_dirr filesep],mask_name) % add seed mask but I think this applies only to Euler tracking?
-    % the only way in which kODF_nii_preprocess3 is different from the
-    % orignal is in that it takes in a studydir which overwrites the ft
-    % parameters studydir value. (same with seed mask) Just so i didn't have to write a bunch of
-    % ft_parameterses
-    
 
     command=['tckgen -algorithm SD_STREAM -seed_image ' gmwmi_mask ' -mask ' mask_name ' ' out_SH ' ' out_tracks ' -cutoff 0.1 -seeds 10000 -select 10000 -angle 60 -force'];
     system(command)
@@ -327,10 +330,6 @@ mni_brain_template=[out_dir filesep 'mnit1.nii.gz'];
 try gunzip(mni_brain_template);catch;end
 mni_brain_template=strrep(mni_brain_template,'.gz','');
 
-% %gunzip mask % why was I doing this...
-% try gunzip(mask_name); catch;end
-% mask_name=strrep(mask_name,'.gz','');
-
 %put atlas in folder, gunzip if necessary
 [~,b,c]=fileparts(atlas4connectome); %this atlas should be in mni space...
 copyfile(atlas4connectome,[out_dir filesep b c]);
@@ -340,8 +339,7 @@ atlas4connectome=[out_dir filesep b c];
 try gunzip(atlas4connectome); catch;end
 atlas4connectome=strrep(atlas4connectome,'.gz','');
 
-% oldNormSub({mni_brain_template,atlas4connectome},mask_name,8,10,0); %I
-% had this line previously... don't know why?
+%normalize atlas to match rt1 using the MNI->rt1 transform
 oldNormSub({mni_brain_template,atlas4connectome},rt1,8,10,0); %using nearest neighbor bc labels
 
 %delete moved MNI image
@@ -354,12 +352,11 @@ atlas4connectome=[a filesep 'w' b c];
 
 
 out_connectome=[out_dir filesep 'connectome_myc1.csv'];
-if exist('atlas4connectome','var') && ~isempty(atlas4connectome) && exist(atlas4connectome,'file')
-    system(['tck2connectome '...
-        out_dir filesep out_tract_name ' '...
-        atlas4connectome ' '...
-        out_connectome ' -force'])
-end
+system(['tck2connectome '...
+    out_dir filesep out_tract_name ' '...
+    atlas4connectome ' '...
+    out_connectome ' -force'])
+
 end
 
 
