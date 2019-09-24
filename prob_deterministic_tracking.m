@@ -27,30 +27,15 @@ function prob_deterministic_tracking(dwi_folder,out_dir,nsim,atlas4connectome,t1
 
 
 
-%% give anonymous functions to everyone
+%% define anonymous functions that will be used later
 
-%inline conditional
-iif = @(varargin) varargin{2 * find([varargin{1:2:end}], 1, 'first')}();
-
-%index even unnamed expressions
-do.paren=@(x,varargin) x(varargin{:});
-do.curly=@(x,varargin) x{varargin{:}};
-
-%add onto a filename
-do.append=@(x,str) fullfile(choose_output(@() fileparts(x),1),[choose_output(@() fileparts(x),2) str choose_output(@() fileparts(x),3)]);
-do.prepend=@(x,str) fullfile(choose_output(@() fileparts(x),1),[str choose_output(@() fileparts(x),2) choose_output(@() fileparts(x),3)]);
-
-%do something and return the out name
-do.move_and_rename=@(in,out) do.curly({movefile(in,out),out},2);
-do.copy_and_rename=@(in,out) do.curly({copyfile(in,out),out},2);
-do.gunzip_and_rename=@(in) iif( ~ischar(in) || numel(in)<4,  @() do.curly({in, warning('invalid gunzip input,returning in unchanged')},1), ... %warningfor invalid inputs
-                                strcmp(in(end-2:end),'.gz'), @() do.curly({gunzip(in), in(1:end-3)},2), ... % if it's named gz gunzip and return out name
-                                true,                        @() in); % if it's not just return the in name
+do = get_anonymous_functions;
 
 %% sanitize inputs and give errors early if at all
 
 if ~exist('atlas4connectome','var') || isempty(atlas4connectome) || ~exist(atlas4connectome,'file')
     warning('can''t find connectome file. Making tracts but not connectome')
+    atlas4connectome='';
 end
 
 %make sure out_dir makes sense. if it doesn't exist, it'll be made when
@@ -64,43 +49,26 @@ out_dir=fullfile(a,b);
 
 [folder_in_which_to_write,working_dwi_name,dwi_first_b0]=denoise_and_create_sims(dwi_folder, out_dir, nsim, do)
 
-try
-    [~,gmwmi_mask,mask_name,~]=t1_preproc(t1_folder, dwi_first_b0, out_dir)
-catch
-%     outs={t1_folder,dwi_first_b0,out_dir}
-    save('had_error.mat')
-    return
-end
 
-try
-    [folder_in_which_to_write,~]=preproc_func_handle(folder_in_which_to_write, working_dwi_name, mask_name,do) % this is kind of a stand in for what the pydesigner pipeline will eventually be
+[~,gmwmi_mask,mask_name,~]=t1_preproc(t1_folder, dwi_first_b0, out_dir,do)
+
+[folder_in_which_to_write,~,out_DT,out_KT,out_FA]=preproc_func_handle(folder_in_which_to_write, working_dwi_name, mask_name,do) % this is kind of a stand in for what the pydesigner pipeline will eventually be
 % if you wanted to use this as is, you could make a wrapper for py designer
 % that just parses input and output file names and hands them to system.
 % Also, here preproc_func_handle isn't an input, but it could be.
-catch
-%     outs={folder_in_which_to_write, working_dwi_name, mask_name,do}
-    save('had_error.mat')
-    return
-end
 
-try
-    track_each(folder_in_which_to_write, mask_name, gmwmi_mask ,atlas4connectome)
-catch
-%     outs={folder_in_which_to_write, mask_name, gmwmi_mask ,atlas4connectome}
-    save('had_error.mat')
-    return
-end
+track_each(folder_in_which_to_write,out_DT,out_KT,out_FA,mask_name,gmwmi_mask,atlas4connectome)
 
 end
 
 
-
-
-
+%------------------------
+% MAIN SUBFUNCTIONS BELOW
+%------------------------
 
 function [folder_in_which_to_write,working_dwi_name,dwi_first_b0]=denoise_and_create_sims(dwi_folder,out_dir,nsim,do)
 
-%% read DWIs
+%% read images
 % FUTURE -- add support for multiple input folders
 
 %---
@@ -192,8 +160,6 @@ end
 
 
 
-
-
 function [rt1,gmwmi_mask,mask_name,out_5tt]=t1_preproc(t1_folder,dwi_first_b0,out_dir,do)
 %% begin t1 processing
 % better to ask for t1 than folder bc t1 metadata isn't required.
@@ -227,9 +193,10 @@ system(['5ttgen fsl '...
     '-nocleanup -force'])
 
 % get a mask output 
-temp_dir=clean_dir(dir('./5ttgen-tmp*')); %DONT use clean_dir
+temp_dir=clean_dir(dir('./5ttgen-tmp*')); 
+
 %grab the most recent folder that matches this pattern
-temp_dir=temp_dir(output(@() max(cat(1,temp_dir.datenum)),2)); 
+temp_dir=temp_dir(choose_output(@() max(cat(1,temp_dir.datenum)),2)); 
 
 %grab mask name
 mask_name=[fnify2(temp_dir) filesep 'T1_BET.nii.gz']; %this betted image is output by mrtrix
@@ -242,10 +209,20 @@ mask_name=do.gunzip_and_rename(mask_name);
 rmdir(fnify2(temp_dir),'s');
 
 %reslice t1 bet into diffusion
-t1_bet=d2n2s(fileparts(mask_name),make_flags('read', 'pick',mask_name, 'no','bvalbvecjson'));
-t1_bet=coregister_obj(dwi_first_b0,t1_bet,make_flags('coregister', 'apply',-1));
 
-%NEED TO ADD WRITING CODE AND REASSIGN MASK NAME
+%read
+t1_bet=d2n2s(fileparts(mask_name),make_flags('read', 'pick',mask_name, 'no','bvalbvecjson'));
+
+%reslice
+t1_bet=coregister_obj(dwi_first_b0,t1_bet,make_flags('coregister', 'apply',-1)); %note that we only have to reslice because the orientations were aligned before 5ttgen ran
+
+%binarize (is there not an image i could grab from the temp dir that's
+%already binarized?!?!)
+t1_bet.img(t1_bet.img>10)=1;
+
+%write
+d2n2s_write(t1_bet,out_dir,'brain_mask2', make_flags('write', 'dt',[0 2]))
+mask_name=[out_dir filesep 'brain_mask.nii'];
 
 % it's annoying this is necessary, but the mrtrix metric and tensor
 % commands need a mask that's resliced to diffusion space. at least we get a little
@@ -287,7 +264,6 @@ for i=1:numel(dwis_preprocd)
     %after preproc, things should be going in the "final" folder with diffusion metrics and eventually tract outputs
     move_obj_files(dwi_clean,fullfile(folder_in_which_to_write{i},'dke'),working_dwi_name);
     
-    
     %update the folder in which to write
     folder_in_which_to_write{i}=fullfile(folder_in_which_to_write{i},'dke');
 
@@ -310,8 +286,6 @@ for i=1:numel(dwis_preprocd)
     system(['tensor2metric ' out_DT ' -fa ' out_FA  ' -mask ' mask_name])
 
 end
-
-
 end
 
 
@@ -355,10 +329,16 @@ system(['tckedit '...
     out_dir '/sim*/dke/tracks.tck '...
     out_dir filesep out_tract_name]);
 
+fprintf('all simulated tracts created and merged into %s',out_tract_name)
+
 %% use tck2connectome to get connectomes
 %warp MNI to T1_in_diffusion and atlas along with
 
-% might should make some of these repeated file handling commands functions
+%see if we're able to do this
+if isempty(atlas4connectome) || ~exist(atlas4connectome,'file')
+    warning('wasn''t able to find atlas file -- exiting before connectome creation')
+    return;
+end
 
 %put mni temp in folder
 mni_brain_template='/usr/local/fsl/data/standard/MNI152_T1_1mm.nii.gz'; %gonna have to find this robustly, perhaps using rorden tools
@@ -396,7 +376,35 @@ system(['tck2connectome '...
 end
 
 
-%% LITTLE FUNCTIONS USED
+%----------------------
+% LITTLE FUNCTIONS USED
+%----------------------
+
+function do = get_anonymous_functions
+
+%inline conditional
+iif = @(varargin) varargin{2 * find([varargin{1:2:end}], 1, 'first')}();
+
+%index even unnamed expressions
+do.paren=@(x,varargin) x(varargin{:});
+do.curly=@(x,varargin) x{varargin{:}};
+
+%add onto a filename
+do.append=@(x,str) fullfile(choose_output(@() fileparts(x),1),[choose_output(@() fileparts(x),2) str choose_output(@() fileparts(x),3)]);
+do.prepend=@(x,str) fullfile(choose_output(@() fileparts(x),1),[str choose_output(@() fileparts(x),2) choose_output(@() fileparts(x),3)]);
+
+%do something and return the out name
+do.move_and_rename=@(in,out) do.curly({movefile(in,out),out},2);
+do.copy_and_rename=@(in,out) do.curly({copyfile(in,out),out},2);
+do.gunzip_and_rename=@(in) iif( ~ischar(in) || numel(in)<4,  @() do.curly({in, warning('invalid gunzip input,returning in unchanged')},1), ... %warning for invalid inputs
+                                strcmp(in(end-2:end),'.gz'), @() do.curly({gunzip(in),void(@() delete(in)),in(1:end-3)},3), ... % if it's named gz gunzip and return out name
+                                true,                        @() in); % if it's not just return the in name
+end
+
+function o=void(f)
+o=1;
+f();
+end
 
 function cdir=clean_dir(dir)
 bdir=arrayfun(@(x) x.name(1)=='.',dir);
