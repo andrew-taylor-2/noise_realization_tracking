@@ -1,6 +1,9 @@
 function prob_deterministic_tracking(dwi_folder,out_dir,nsim,atlas4connectome,t1_folder)
 %function is in a weird state because I'm trying to make this more modular
 
+%is "folder_in_which_to_write" still a good construct? or should each
+%module just assume some path stuff from the last?
+
 % NOTES FOR RUNNING:
 %{
 %1
@@ -297,9 +300,9 @@ ft_params_template=[fileparts(which(mfilename)) filesep 'ft_parameters.txt']; %j
 for i=1:numel(folder_in_which_to_write)
     
     %kODF for SH_coeff
-    study_dirr=fileparts(in);
-    out_SH=[folder_in_which_to_write{i} filesep 'dke' filesep 'SH_coeff.nii']; 
-    out_tracks=[folder_in_which_to_write{i} filesep 'dke' filesep 'tracks.tck'];
+    study_dirr=folder_in_which_to_write{i};
+    out_SH=[folder_in_which_to_write{i} filesep 'SH_coeff.nii']; 
+    out_tracks=[folder_in_which_to_write{i} filesep 'tracks.tck'];
     
     %kODF..3 extends kODF... to take studydir and mask as inputs
     kODF_nii_preprocess3(ft_params_template,out_DT,out_KT,out_FA,[study_dirr filesep],mask_name) % add seed mask but I think this applies only to Euler tracking?
@@ -314,6 +317,7 @@ end
 
 
 %% generate screenshots of realized tracts
+out_dir=fileparts(fileparts(folder_in_which_to_write{i}));
 system(['ii=1; for folder in ' out_dir '/sim*/dke; do '...
     'mrview -load $folder/fa.nii '...
     '-tractography.load $folder/tracks.tck '...
@@ -438,3 +442,40 @@ matlabbatch{1}.spm.tools.oldnorm.estwrite.roptions.wrap = [0 0 0];
 matlabbatch{1}.spm.tools.oldnorm.estwrite.roptions.prefix = 'w';
 spm_jobman('run',matlabbatch);
 end
+
+function the_pattern=make_a_pattern(patterned_cellstr)
+%makes a pattern by matching characters forward into the string until a
+%divergence, then backward, then joins the two with an asterisk.
+%
+%takes in a cell array of strings
+
+%takes about 0.002 seconds for numel(patterned_cellstr)==10 and time increases
+%linearly with its length and with the length of the beginning and ending
+%strings
+
+max_identicality_index=-1; %start 1 away from lowest possible ("doesn't end up indexing anything") bc it gets incremented once irrespective of the data
+samee=true;
+while samee==true 
+    max_identicality_index=max_identicality_index+1;
+    letters=cellfun(@(x) x(max_identicality_index+1),patterned_cellstr,'un',0);
+    samee=all(isequal(letters{:}));
+end
+    
+min_identicality_index=2; %start 1 away from highest possible ("doesn't end up indexing anything") bc it gets incremented once irrespective of the data
+samee=true;
+while samee==true 
+    min_identicality_index=min_identicality_index-1;
+    letters=cellfun(@(x) x(numel(x)+min_identicality_index-1),patterned_cellstr,'un',0);
+    samee=all(isequal(letters{:}));
+end
+
+the_pattern=[patterned_cellstr{1}(1:max_identicality_index) '*' patterned_cellstr{1}(end+min_identicality_index:end)];
+end
+
+
+
+
+
+
+
+
