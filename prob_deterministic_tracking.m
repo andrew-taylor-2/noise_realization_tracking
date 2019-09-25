@@ -7,27 +7,8 @@ function prob_deterministic_tracking(dwi_folder,out_dir,nsim,atlas4connectome,t1
 % NOTES FOR RUNNING:
 %{
 %1
-%d2n2s (repository) must be on path, clone from https://github.com/andrew-taylor-2/d2n2s
-%and put on matlab path
-
-%2
-%I tried to cut out all the steps I did that didn't work. I ended up trying stuff on several different directories, so hopefully all my paths work here.
-%Hopefully the script still flows.
-
-%3 
-%certain paths need to be changed. I think I put "%CHANGE" after each one.
-%also at one point you'll have to give a mask you made yourself. also you
-%have to tell dke ur number of directions in a variable at one point.
-
-%4
-%while it shouldn't be an issue in the body of the script, in the first two
-%"d2n2s" commands below, you have to give d2n2s a folder with ONLY a .nii,
-%a .bvec, a .bval, and optionally a .json. If the folder contains multiple
-%files of these types, it won't work right. Also, the files need to match
-%in number of elements and stuff. You can't have a .nii file with 61 images
-%and a .bval or .bvec with only 60 lines.
+See README.md for dependencies and descriptions of the inputs
 %}
-
 
 
 %% define anonymous functions that will be used later
