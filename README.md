@@ -20,5 +20,5 @@ Arguments:
 
 ## Notes
 - Currently, this function only works on Mac and Unix, but it can be made to work on Windows very easily
-- Using an 88x88x50 DWI with 10 b0s, 64 b1000s, and 64 b2000s; a 192x256x256 T1; and an `nsim` of 5 on my iMac Pro with 8 logical cores, this took 45 minutes to complete
+- Using an 88x88x50 DWI with 10 b0s, 64 b1000s, and 64 b2000s; a 192x256x256 T1; and an `nsim` of 5, and an `nseeds` equivalent of about 7000 on my iMac Pro with 8 logical cores, this took 45 minutes to complete
 

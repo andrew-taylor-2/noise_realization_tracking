@@ -4,9 +4,12 @@ function prob_deterministic_tracking(dwi_folder,t1_folder,out_dir,nsim,nseeds,at
 %is "folder_in_which_to_write" still a good construct? or should each
 %module just assume some path stuff from the last?
 
+%right now it looks like this takes about 9 minutes + 3 mins * number
+%of realizations for the inputs described in README.md. For the same
+%inputs, it seems to use about 1 gb + 0.85gb * number realizations.
+
 % NOTES FOR RUNNING:
 %{
-%1
 See README.md for dependencies and descriptions of the inputs
 %}
 
@@ -26,8 +29,6 @@ end
 %images are written
 assert(logical(exist('out_dir','var')))
 out_dir=char(out_dir);
-[a,b,~]=fileparts(out_dir); %this does preclude using folders that contain a period...
-out_dir=fullfile(a,b);
 
 %% find number cores for mrtrix CL tools
 numcores=feature('numcores');
@@ -282,7 +283,7 @@ end
 
 
 
-function track_each(folder_in_which_to_write,out_DT,out_KT,out_FA,mask_name,gmwmi_mask,atlas4connectome,rt1,numcores,do)
+function track_each(folder_in_which_to_write,out_DT,out_KT,out_FA,mask_name,gmwmi_mask,atlas4connectome,rt1,nseeds,numcores,do)
 %% get tensors, metrics, SH, and track.
 ft_params_template=[fileparts(which(mfilename)) filesep 'ft_parameters.txt']; %just look in the same folder as this function for the template
 
