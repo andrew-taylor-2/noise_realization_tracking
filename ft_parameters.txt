@@ -18,7 +18,7 @@ subject_list = {''};         %Specify subject numbers (i.e. {'Subject01','Subjec
 
 %Tractography (not used - using tractography from MRTRIX) 
 
-    tractography_flg = 1;      %Perform tractography (1) or don't perform tractography (0).
+    tractography_flg = 0;      %Perform tractography (1) or don't perform tractography (0).
     fa_threshold = 0.1;        %FA threshold.
     angle_threshold = 35;      %Angle threshold in degrees.
     trk_length = 20;           %Minimum tract length in mm.
@@ -34,7 +34,7 @@ subject_list = {''};         %Specify subject numbers (i.e. {'Subject01','Subjec
     
 %Make DSI Studio .fib file
 
-    make_fib_file = 1;      %Make .fib file to read in DSI Studio (1) or skip this step (0).
+    make_fib_file = 0;      %Make .fib file to read in DSI Studio (1) or skip this step (0).
     save_odfs = 1;          %Save dODFS in .fib file (1) or not (0). This only affects visualization as orientations are still saved for tractography. 
     scale_odf = 0.5;        %Affects overall size of odfs in .fib file. This only affects visualization.
     odf_size = 20000;       %Size of odf_n variables. Reduce this if there are issues with RAM.
