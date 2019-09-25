@@ -48,19 +48,26 @@ out_dir=char(out_dir);
 [a,b,~]=fileparts(out_dir); %this does preclude using folders that contain a period...
 out_dir=fullfile(a,b);
 
+%% find number cores for mrtrix CL tools
+numcores=feature('numcores');
+if ~isnumeric(numcores) || numcores<1 || numcores>100 %unrealistic, maybe error code
+    numcores=2;
+end
+numcores=num2str(numcores);
+
 %% MAIN
 
-[folder_in_which_to_write,working_dwi_name,dwi_first_b0]=denoise_and_create_sims(dwi_folder, out_dir, nsim, do)
+[folder_in_which_to_write,working_dwi_name,dwi_first_b0]=denoise_and_create_sims(dwi_folder, out_dir, nsim, do);
 
 
-[~,gmwmi_mask,mask_name,~]=t1_preproc(t1_folder, dwi_first_b0, out_dir,do)
+[rt1,gmwmi_mask,mask_name,~]=t1_preproc(t1_folder, dwi_first_b0, out_dir,numcores,do);
 
-[folder_in_which_to_write,~,out_DT,out_KT,out_FA]=preproc_func_handle(folder_in_which_to_write, working_dwi_name, mask_name,do) % this is kind of a stand in for what the pydesigner pipeline will eventually be
+[folder_in_which_to_write,~,out_DT,out_KT,out_FA]=preproc_func_handle(folder_in_which_to_write, working_dwi_name, mask_name,numcores,do); % this is kind of a stand in for what the pydesigner pipeline will eventually be
 % if you wanted to use this as is, you could make a wrapper for py designer
 % that just parses input and output file names and hands them to system.
 % Also, here preproc_func_handle isn't an input, but it could be.
 
-track_each(folder_in_which_to_write,out_DT,out_KT,out_FA,mask_name,gmwmi_mask,atlas4connectome)
+track_each(folder_in_which_to_write,out_DT,out_KT,out_FA,mask_name,gmwmi_mask,atlas4connectome,rt1,numcores,do);
 
 end
 
@@ -157,13 +164,13 @@ end
 
 %how long did it all take?
 reall_time=toc;
-fprintf('Time to add noise and write realizations: %s',num2str(reall_time))
+fprintf('Seconds to add noise and write realizations: %s',num2str(reall_time))
 
 end
 
 
 
-function [rt1,gmwmi_mask,mask_name,out_5tt]=t1_preproc(t1_folder,dwi_first_b0,out_dir,do)
+function [rt1,gmwmi_mask,mask_name,out_5tt]=t1_preproc(t1_folder,dwi_first_b0,out_dir,numcores,do)
 %% begin t1 processing
 % better to ask for t1 than folder bc t1 metadata isn't required.
 %   This goes here instead of beginning bc DWI is loaded now.
@@ -193,7 +200,7 @@ out_5tt=fullfile(out_dir,'5tt.nii'); %I'm not losing anything by using nii and n
 system(['5ttgen fsl '...
     rt1 ' '... %in: t1 aligned with diff
     out_5tt ' '... % out: segmentations aligned with diff
-    '-nocleanup -force'])
+    '-nocleanup -force -nthreads ' numcores'])
 
 % get a mask output 
 temp_dir=clean_dir(dir('./5ttgen-tmp*')); 
@@ -221,10 +228,11 @@ t1_bet=coregister_obj(dwi_first_b0,t1_bet,make_flags('coregister', 'apply',-1));
 
 %binarize (is there not an image i could grab from the temp dir that's
 %already binarized?!?!)
+t1_bet.img(t1_bet.img<=10)=0;
 t1_bet.img(t1_bet.img>10)=1;
 
 %write
-d2n2s_write(t1_bet,out_dir,'brain_mask2', make_flags('write', 'dt',[0 2]))
+d2n2s_write(t1_bet,out_dir,'brain_mask', make_flags('write', 'dt',[0 2]))
 mask_name=[out_dir filesep 'brain_mask.nii'];
 
 % it's annoying this is necessary, but the mrtrix metric and tensor
@@ -235,7 +243,7 @@ mask_name=[out_dir filesep 'brain_mask.nii'];
 gmwmi_mask=[out_dir filesep 'gmwmi_mask.nii'];
 system(['5tt2gmwmi '...
     out_5tt ' '...
-    gmwmi_mask])
+    gmwmi_mask ' -force  -nthreads ' numcores])
 
 % we're done with T1s for now -- we wanted to set up for tractography later, so we
 % need to prepare DWIs
@@ -243,7 +251,7 @@ system(['5tt2gmwmi '...
 end
 
 
-function [folder_in_which_to_write,working_dwi_name,out_DT,out_KT,out_FA]=preproc_func_handle(folder_in_which_to_write,working_dwi_name,mask_name,do)
+function [folder_in_which_to_write,working_dwi_name,out_DT,out_KT,out_FA]=preproc_func_handle(folder_in_which_to_write,working_dwi_name,mask_name,numcores,do)
 %% Do some preprocessing
 % I can just put it in the folder it was in before and use pick later
 
@@ -253,7 +261,7 @@ out=do.append(in,'_dn');
 [~,working_dwi_name,~]=fileparts(out);
 
 %denoise and get the output names
-dn_and_give_out_name=@(x) do.curly({system(['dwidenoise ' fullfile(x,in) ' ' fullfile(x,out)]) , fullfile(x,out)},2);
+dn_and_give_out_name=@(x) do.curly({system(['dwidenoise ' fullfile(x,in) ' ' fullfile(x,out) ' -force  -nthreads ' numcores]) , fullfile(x,out)},2);
 dwis_preprocd=cellfun(dn_and_give_out_name,folder_in_which_to_write,'un',0);
 
 %just grab these and write to the out folder (the use of d2n2s is justified
@@ -281,19 +289,19 @@ for i=1:numel(dwis_preprocd)
     out_KT=[fileparts(in) filesep 'KT.nii'];
     
     %run dwi2tensor
-    system(['dwi2tensor ' in_nii ' ' out_DT ' -dkt ' out_KT ' -fslgrad ' in_bvec ' ' in_bval ' -mask ' mask_name])
+    system(['dwi2tensor ' in_nii ' ' out_DT ' -dkt ' out_KT ' -fslgrad ' in_bvec ' ' in_bval ' -mask ' mask_name ' -force  -nthreads ' numcores])
     
     % tensor2metric or something else for at least fa. probably use
     % designer in the future
     out_FA=[fileparts(in) filesep 'fa.nii'];
-    system(['tensor2metric ' out_DT ' -fa ' out_FA  ' -mask ' mask_name])
+    system(['tensor2metric ' out_DT ' -fa ' out_FA  ' -mask ' mask_name ' -force  -nthreads ' numcores])
 
 end
 end
 
 
 
-function track_each(folder_in_which_to_write,out_DT,out_KT,out_FA,mask_name,gmwmi_mask,atlas4connectome)
+function track_each(folder_in_which_to_write,out_DT,out_KT,out_FA,mask_name,gmwmi_mask,atlas4connectome,rt1,numcores,do)
 %% get tensors, metrics, SH, and track.
 ft_params_template=[fileparts(which(mfilename)) filesep 'ft_parameters.txt']; %just look in the same folder as this function for the template
 
@@ -307,7 +315,7 @@ for i=1:numel(folder_in_which_to_write)
     %kODF..3 extends kODF... to take studydir and mask as inputs
     kODF_nii_preprocess3(ft_params_template,out_DT,out_KT,out_FA,[study_dirr filesep],mask_name) % add seed mask but I think this applies only to Euler tracking?
 
-    command=['tckgen -algorithm SD_STREAM -seed_image ' gmwmi_mask ' -mask ' mask_name ' ' out_SH ' ' out_tracks ' -cutoff 0.1 -seeds 10000 -select 10000 -angle 60 -force'];
+    command=['tckgen -algorithm SD_STREAM -seed_image ' gmwmi_mask ' -mask ' mask_name ' ' out_SH ' ' out_tracks ' -cutoff 0.1 -seeds 10000 -select 10000 -angle 60 -force -nthreads ' numcores];
     system(command)
     
     % just tested this all lightly -- masking with t1 is fine. gmwmi_mask
@@ -331,7 +339,7 @@ system(['ii=1; for folder in ' out_dir '/sim*/dke; do '...
 out_tract_name='all_tracks.tck';
 system(['tckedit '...
     out_dir '/sim*/dke/tracks.tck '...
-    out_dir filesep out_tract_name]);
+    out_dir filesep out_tract_name ' -nthreads ' numcores]);
 
 fprintf('all simulated tracts created and merged into %s',out_tract_name)
 
@@ -346,36 +354,32 @@ end
 
 %put mni temp in folder
 mni_brain_template='/usr/local/fsl/data/standard/MNI152_T1_1mm.nii.gz'; %gonna have to find this robustly, perhaps using rorden tools
-copyfile(mni_brain_template,[out_dir filesep 'mnit1.nii.gz'])
-mni_brain_template=[out_dir filesep 'mnit1.nii.gz'];
+mni_brain_template=do.copy_and_rename(mni_brain_template,[out_dir filesep 'mnit1.nii.gz']);
 
 %gunzip mni temp
 mni_brain_template=do.gunzip_and_rename(mni_brain_template);
 
-%put atlas in folder, gunzip if necessary
+%copy atlas to folder
 [~,b,c]=fileparts(atlas4connectome); %this atlas should be in mni space...
 atlas4connectome=do.copy_and_rename(atlas4connectome,[out_dir filesep b c]);
 
-%gunzip atlas 
+%gunzip atlas
 atlas4connectome=do.gunzip_and_rename(atlas4connectome);
 
 %normalize atlas to match rt1 using the MNI->rt1 transform
 oldNormSub({mni_brain_template,atlas4connectome},rt1,8,10,0); %using nearest neighbor bc labels
 
-%delete moved MNI image
-[a,b,c]=fileparts(mni_brain_template);
-delete([a filesep 'w' b c])
+%delete warped MNI image
+delete(do.prepend(mni_brain_template,'w'));
 
 %change working name of atlas you moved
-[a,b,c]=fileparts(atlas4connectome);
-atlas4connectome=[a filesep 'w' b c];
-
+atlas4connectome=do.prepend(atlas4connectome,'w');
 
 out_connectome=[out_dir filesep 'connectome_myc1.csv'];
 system(['tck2connectome '...
     out_dir filesep out_tract_name ' '...
     atlas4connectome ' '...
-    out_connectome ' -force'])
+    out_connectome ' -force -nthreads ' numcores'])
 
 end
 
@@ -393,7 +397,11 @@ iif = @(varargin) varargin{2 * find([varargin{1:2:end}], 1, 'first')}();
 do.paren=@(x,varargin) x(varargin{:});
 do.curly=@(x,varargin) x{varargin{:}};
 
-%add onto a filename
+%add onto a filename -- these have been tested, and they're about 3 times
+%slower than their multiline function counterparts. This is a negligible
+%portion of the total runtime of this routine, though. I'm using these
+%anonymous functions in the first place for clarity and readability of
+%code. I think they're worth it
 do.append=@(x,str) fullfile(choose_output(@() fileparts(x),1),[choose_output(@() fileparts(x),2) str choose_output(@() fileparts(x),3)]);
 do.prepend=@(x,str) fullfile(choose_output(@() fileparts(x),1),[str choose_output(@() fileparts(x),2) choose_output(@() fileparts(x),3)]);
 
@@ -401,14 +409,15 @@ do.prepend=@(x,str) fullfile(choose_output(@() fileparts(x),1),[str choose_outpu
 do.move_and_rename=@(in,out) do.curly({movefile(in,out),out},2);
 do.copy_and_rename=@(in,out) do.curly({copyfile(in,out),out},2);
 do.gunzip_and_rename=@(in) iif( ~ischar(in) || numel(in)<4,  @() do.curly({in, warning('invalid gunzip input,returning in unchanged')},1), ... %warning for invalid inputs
-                                strcmp(in(end-2:end),'.gz'), @() do.curly({gunzip(in),void(@() delete(in)),in(1:end-3)},3), ... % if it's named gz gunzip and return out name
+                                strcmp(in(end-2:end),'.gz'), @() do.curly({gunzip(in),void(@() delete(in)),in(1:end-3)},3), ... % if it's named ".gz", gunzip and return out name
                                 true,                        @() in); % if it's not just return the in name
-end
 
 function o=void(f)
 o=1;
 f();
 end
+end
+
 
 function cdir=clean_dir(dir)
 bdir=arrayfun(@(x) x.name(1)=='.',dir);
