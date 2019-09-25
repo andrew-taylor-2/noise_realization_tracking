@@ -1,4 +1,4 @@
-function prob_deterministic_tracking(dwi_folder,out_dir,nsim,atlas4connectome,t1_folder)
+function prob_deterministic_tracking(dwi_folder,t1_folder,out_dir,nsim,nseeds,atlas4connectome)
 %function is in a weird state because I'm trying to make this more modular
 
 %is "folder_in_which_to_write" still a good construct? or should each
@@ -48,7 +48,7 @@ numcores=num2str(numcores);
 % that just parses input and output file names and hands them to system.
 % Also, here preproc_func_handle isn't an input, but it could be.
 
-track_each(folder_in_which_to_write,out_DT,out_KT,out_FA,mask_name,gmwmi_mask,atlas4connectome,rt1,numcores,do);
+track_each(folder_in_which_to_write,out_DT,out_KT,out_FA,mask_name,gmwmi_mask,atlas4connectome,rt1,nseeds,numcores,do);
 
 end
 
@@ -296,12 +296,17 @@ for i=1:numel(folder_in_which_to_write)
     %kODF..3 extends kODF... to take studydir and mask as inputs
     kODF_nii_preprocess3(ft_params_template,out_DT,out_KT,out_FA,[study_dirr filesep],mask_name) % add seed mask but I think this applies only to Euler tracking?
 
-    command=['tckgen -algorithm SD_STREAM -seed_image ' gmwmi_mask ' -mask ' mask_name ' ' out_SH ' ' out_tracks ' -cutoff 0.1 -seeds 10000 -select 10000 -angle 60 -force -nthreads ' numcores];
+    command=['tckgen -algorithm SD_STREAM -seed_image ' gmwmi_mask ' -mask ' mask_name ' ' out_SH ' ' out_tracks ' -cutoff 0.1 -select ' nseeds ' -angle 60 -force -nthreads ' numcores];
     system(command)
     
     % just tested this all lightly -- masking with t1 is fine. gmwmi_mask
     % seeding is fine. wm99thresh seeding is fine. they seem similar. but -cutoff 0.05
     % make the tracts look gross.
+    
+    %also: Previously was using -select and -seeds ==10000. It seems that
+    %if a different number of seeds was being selected for each
+    %realization, that would give a "weight" to the realization. This
+    %may be desired. or it may not.
 end
 
 

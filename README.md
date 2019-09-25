@@ -8,6 +8,7 @@ Arguments:
 	`t1_folder`: A folder containing a T1 .nii file of the chosen subject.
 	`out_dir`: A directory in which to place the outputs
 	`nsim`: The number of noise realizations to write. The time for this function to run is linearly related to `nsim`
+	`nseeds`: A number of seeds to be "selected" from each realization. This is input directly into "tckgen ... -select <nseeds>"
 	`atlas4connectome`: An atlas *in MNI space* that will be used to generate a connectome. This function will use SPM's "Old Normalise" to warp the atlas into subject space based on "MNI152_T1_1mm.nii.gz" included with FSL.
 
 ## Dependencies
