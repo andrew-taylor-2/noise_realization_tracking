@@ -34,8 +34,8 @@ subject_list = {''};         %Specify subject numbers (i.e. {'Subject01','Subjec
     
 %Make DSI Studio .fib file
 
-    make_fib_file = 0;      %Make .fib file to read in DSI Studio (1) or skip this step (0).
-    save_odfs = 1;          %Save dODFS in .fib file (1) or not (0). This only affects visualization as orientations are still saved for tractography. 
+    make_fib_file = 1;      %Make .fib file to read in DSI Studio (1) or skip this step (0).
+    save_odfs = 0;          %Save dODFS in .fib file (1) or not (0). This only affects visualization as orientations are still saved for tractography. 
     scale_odf = 0.5;        %Affects overall size of odfs in .fib file. This only affects visualization.
     odf_size = 20000;       %Size of odf_n variables. Reduce this if there are issues with RAM.
-    odf_res = 'high';        %{'low' or 'high'}; Number of points saved in ODFs ~ only affects visualization. Use 'low' to reduce memory requirements and use 'high' for the smoothest dODF surface renderings. 
+    odf_res = 'low';        %{'low' or 'high'}; Number of points saved in ODFs ~ only affects visualization. Use 'low' to reduce memory requirements and use 'high' for the smoothest dODF surface renderings. 
