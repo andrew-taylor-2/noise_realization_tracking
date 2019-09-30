@@ -1,8 +1,4 @@
 function prob_deterministic_tracking(dwi_folder,t1_folder,out_dir,nsim,nseeds,atlas4connectome)
-%function is in a weird state because I'm trying to make this more modular
-
-%is "folder_in_which_to_write" still a good construct? or should each
-%module just assume some path stuff from the last?
 
 %right now it looks like this takes about 9 minutes + 3 mins * number
 %of realizations for the inputs described in README.md. For the same
@@ -148,6 +144,9 @@ end
 reall_time=toc;
 fprintf('Seconds to add noise and write realizations: %s',num2str(reall_time))
 
+
+%is "folder_in_which_to_write" still a good construct? or should each
+%module just assume some path stuff from the last?
 end
 
 
@@ -295,7 +294,7 @@ for i=1:numel(folder_in_which_to_write)
     out_tracks=[folder_in_which_to_write{i} filesep 'tracks.tck'];
     
     %kODF..3 extends kODF... to take studydir and mask as inputs
-    kODF_nii_preprocess3(ft_params_template,out_DT,out_KT,out_FA,[study_dirr filesep],mask_name) % add seed mask but I think this applies only to Euler tracking?
+    kODF_nii_preprocess(ft_params_template,out_DT,out_KT,out_FA,[study_dirr filesep],mask_name) % add seed mask but I think this applies only to Euler tracking?
 
     command=['tckgen -algorithm SD_STREAM -seed_image ' gmwmi_mask ' -mask ' mask_name ' ' out_SH ' ' out_tracks ' -cutoff 0.1 -select ' nseeds ' -angle 60 -force -nthreads ' numcores];
     system(command)
