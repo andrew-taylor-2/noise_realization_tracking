@@ -9,6 +9,9 @@ function prob_deterministic_tracking(dwi_folder,t1_folder,out_dir,nsim,nseeds,at
 See README.md for dependencies and descriptions of the inputs
 %}
 
+%% add folders to path
+addpath(fileparts(which(mfilename)))
+addpath([fileparts(which(mfilename)) filesep 'external'])
 
 %% define anonymous functions that will be used later
 
@@ -361,7 +364,7 @@ delete(do.prepend(mni_brain_template,'w'));
 %change working name of atlas you moved
 atlas4connectome=do.prepend(atlas4connectome,'w');
 
-out_connectome=[out_dir filesep 'connectome_myc1.csv'];
+out_connectome=[out_dir filesep 'connectome.csv'];
 system(['tck2connectome '...
     out_dir filesep out_tract_name ' '...
     atlas4connectome ' '...
